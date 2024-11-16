@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>リアルタイム音量メーター & マイクリスト</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      line-height: 1.6;
+    }
+    h1, h2 {
+      text-align: center;
+    }
+    ul {
+      list-style-type: none;
+      padding: 0;
+      margin: 10px 0;
+    }
+    li {
+      margin: 5px 0;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      word-wrap: break-word;
+      font-size: 1rem;
+    }
+    canvas {
+      border: 1px solid black;
+      display: block;
+      margin: 20px auto;
+      width: 90%; /* スマホ画面でキャンバス幅を調整 */
+      max-width: 400px; /* PCで最大幅を設定 */
+    }
+    button {
+      display: inline-block;
+      margin: 10px 5px;
+      padding: 10px 20px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 5px;
+      background-color: #007BFF;
+      color: white;
+      cursor: pointer;
+    }
+    button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9rem;
+      }
+      button {
+        width: 100%; /* ボタンを全幅に */
+        margin: 5px 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h1>リアルタイム音量メーター & マイクリスト</h1>
+  <h2>現在接続されているマイクデバイス:</h2>
+  <ul id="deviceList">
+    <li>デバイス情報を取得中...</li>
+  </ul>
+  <h2>音量メーター</h2>
+  <button id="startButton">スタート</button>
+  <button id="stopButton" disabled>ストップ</button>
+  <canvas id="volumeMeter" width="300" height="50"></canvas>
+
+  <script>
+    const startButton = document.getElementById('startButton');
+    const stopButton = document.getElementById('stopButton');
+    const canvas = document.getElementById('volumeMeter');
+    const canvasCtx = canvas.getContext('2d');
+
+    let audioContext = null;
+    let mediaStream = null;
+    let source = null;
+    let analyser = null;
+    let animationFrameId = null;
+
+    // 音量バーの閾値（範囲を超えたら赤色）
+    const WARNING_THRESHOLD = 180;
+
+    // マイクデバイスのリスト表示
+    async function listAudioDevices() {
+      const deviceListElement = document.getElementById('deviceList');
+      deviceListElement.innerHTML = ''; // 初期化
+
+      try {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputDevices = devices.filter(device => device.kind === 'audioinput');
+
+        if (audioInputDevices.length > 0) {
+          audioInputDevices.forEach(device => {
+            const listItem = document.createElement('li');
+            listItem.textContent = device.label || '名前が未設定のマイク';
+            deviceListElement.appendChild(listItem);
+          });
+        } else {
+          const listItem = document.createElement('li');
+          listItem.textContent = 'マイクデバイスが見つかりませんでした。';
+          deviceListElement.appendChild(listItem);
+        }
+      } catch (error) {
+        console.error('デバイスリストの取得中にエラーが発生しました:', error);
+        const listItem = document.createElement('li');
+        listItem.textContent = 'デバイスリストの取得に失敗しました。';
+        deviceListElement.appendChild(listItem);
+      }
+    }
+
+    // 音量メーターの描画
+    function drawVolumeMeter() {
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      function draw() {
+        analyser.getByteFrequencyData(dataArray);
+
+        const maxVolume = Math.max(...dataArray);
+
+        canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+
+        canvasCtx.fillStyle = maxVolume > WARNING_THRESHOLD ? "red" : "green";
+        const barWidth = (maxVolume / 255) * canvas.width;
+        canvasCtx.fillRect(0, 0, barWidth, canvas.height);
+
+        animationFrameId = requestAnimationFrame(draw);
+      }
+
+      draw();
+    }
+
+    startButton.addEventListener('click', async () => {
+      try {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        source = audioContext.createMediaStreamSource(mediaStream);
+
+        analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+
+        source.connect(analyser);
+
+        drawVolumeMeter();
+
+        startButton.disabled = true;
+        stopButton.disabled = false;
+      } catch (error) {
+        console.error("[ERROR] マイクへのアクセスに失敗しました:", error);
+        alert("マイクへのアクセスが拒否されました: " + error.message);
+      }
+    });
+
+    stopButton.addEventListener('click', () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+      if (source) {
+        source.disconnect();
+      }
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop());
+      }
+      if (audioContext) {
+        audioContext.close();
+      }
+
+      startButton.disabled = false;
+      stopButton.disabled = true;
+
+      canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+    });
+
+    // ページ読み込み時にデバイスリストを取得
+    listAudioDevices();
+  </script>
+</body>
+</html>
